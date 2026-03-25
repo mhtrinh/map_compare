@@ -1,5 +1,7 @@
 # Map Compare
 
+**[Live at https://mhtrinh.github.io/map_compare/](https://mhtrinh.github.io/map_compare/)**
+
 The idea: when you read that a city covers X km², it's hard to grasp what that means. Draw the outline of a city you know, then drag it over another city to see how they compare at real-world scale.
 
 ## Features
