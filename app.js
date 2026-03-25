@@ -39,7 +39,13 @@ document.addEventListener('DOMContentLoaded', () => {
   setupCanvas();
   setupControls();
   attachDrawListeners();
-  setMode('draw');
+
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    deserializeState(hash);
+  } else {
+    setMode('draw');
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -111,6 +117,7 @@ function setupControls() {
   });
 
   document.getElementById('delete-all-btn').addEventListener('click', resetPolygon);
+  document.getElementById('share-btn').addEventListener('click', onShareClick);
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +595,86 @@ function resetPolygon() {
   pendingVertex = null;
   drag = null;
   render();
+}
+
+// ---------------------------------------------------------------------------
+// Share: serialize / deserialize state via URL hash
+// ---------------------------------------------------------------------------
+
+function serializeState() {
+  if (polygon.points.length === 0) {
+    return false;
+  }
+
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const centroidLatLng = map.containerPointToLatLng(
+    L.point(polygon.screenPos.x, polygon.screenPos.y)
+  );
+
+  const payload = {
+    v: 1,
+    map: { lat: center.lat, lng: center.lng, z: zoom },
+    centroid: { lat: centroidLatLng.lat, lng: centroidLatLng.lng },
+    points: polygon.points.map(function(p) { return [p.dx, p.dy]; }),
+    rotation: polygon.rotation,
+    closed: polygon.closed,
+  };
+
+  window.location.hash = btoa(JSON.stringify(payload));
+  return true;
+}
+
+function deserializeState(hash) {
+  try {
+    var json = atob(hash);
+    var data = JSON.parse(json);
+
+    if (!data.v || !data.map || !data.centroid || !data.points) {
+      console.warn('deserializeState: missing required fields');
+      setMode('draw');
+      return;
+    }
+
+    map.setView([data.map.lat, data.map.lng], data.map.z, { animate: false });
+
+    var screenPt = map.latLngToContainerPoint(
+      L.latLng(data.centroid.lat, data.centroid.lng)
+    );
+    polygon.screenPos = { x: screenPt.x, y: screenPt.y };
+
+    polygon.points = data.points.map(function(arr) {
+      return { dx: arr[0], dy: arr[1] };
+    });
+    polygon.rotation = data.rotation || 0;
+    polygon.closed = !!data.closed;
+
+    var slider = document.getElementById('rotation-slider');
+    var rotValue = document.getElementById('rotation-value');
+    slider.value = polygon.rotation;
+    rotValue.textContent = polygon.rotation;
+
+    setMode('draw');
+  } catch (err) {
+    console.warn('deserializeState: invalid hash data', err);
+    setMode('draw');
+  }
+}
+
+function onShareClick() {
+  var btn = document.getElementById('share-btn');
+  var originalText = btn.textContent;
+
+  if (!serializeState()) {
+    btn.textContent = 'Nothing to share';
+    setTimeout(function() { btn.textContent = originalText; }, 1500);
+    return;
+  }
+
+  navigator.clipboard.writeText(window.location.href).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = originalText; }, 1500);
+  });
 }
 
 // ---------------------------------------------------------------------------

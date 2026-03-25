@@ -62,6 +62,23 @@ html, body {
   border-color: #1a6fd4;
 }
 
+#share-btn {
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 2px solid #2ea043;
+  background: #2ea043;
+  color: white;
+  border-radius: 5px;
+  transition: background 0.2s, color 0.2s;
+}
+
+#share-btn:hover {
+  background: #238636;
+  border-color: #238636;
+}
+
 #rotation-row {
   display: flex;
   flex-direction: column;
