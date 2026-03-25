@@ -29,7 +29,7 @@ html, body {
   pointer-events: auto;
 }
 
-#controls {
+#slider-panel {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -41,42 +41,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 220px;
   pointer-events: auto;
-}
-
-#mode-btn {
-  padding: 8px 12px;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
-  border: 2px solid #3388ff;
-  background: #3388ff;
-  color: white;
-  border-radius: 5px;
-  transition: background 0.2s, color 0.2s;
-}
-
-#mode-btn:hover {
-  background: #1a6fd4;
-  border-color: #1a6fd4;
-}
-
-#share-btn {
-  padding: 8px 12px;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
-  border: 2px solid #2ea043;
-  background: #2ea043;
-  color: white;
-  border-radius: 5px;
-  transition: background 0.2s, color 0.2s;
-}
-
-#share-btn:hover {
-  background: #238636;
-  border-color: #238636;
 }
 
 #rotation-row {
@@ -95,8 +60,148 @@ html, body {
   cursor: pointer;
 }
 
-#instructions {
+#button-row {
+  position: absolute;
+  top: 80px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  pointer-events: auto;
+}
+
+.icon-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  cursor: pointer;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+  padding: 0;
+  line-height: 1;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4));
+}
+
+.icon-btn:hover {
+  opacity: 0.7;
+}
+
+.icon-btn.hidden {
+  display: none;
+}
+
+.icon-btn.feedback::after {
+  content: attr(data-feedback);
+  position: absolute;
+  right: 42px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #333;
+  color: white;
   font-size: 12px;
-  color: #555;
-  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#mode-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.65);
+  color: white;
+  font-size: 14px;
+  padding: 8px 20px;
+  border-radius: 20px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#mode-toast.visible {
+  opacity: 1;
+}
+
+/* Bookmark panel — floating left, below Leaflet zoom control */
+#bookmark-panel {
+  position: absolute;
+  top: 80px;
+  left: 12px;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  min-width: 180px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.bookmark-navigate {
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.bookmark-navigate:hover {
+  opacity: 0.7;
+}
+
+.bookmark-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  color: #333;
+}
+
+.bookmark-name:hover {
+  text-decoration: underline;
+}
+
+.bookmark-name-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 1px 4px;
+  border: 1px solid #3388ff;
+  border-radius: 3px;
+  outline: none;
+  min-width: 0;
+}
+
+.bookmark-delete {
+  cursor: pointer;
+  color: #cc3333;
+  font-size: 16px;
+  flex-shrink: 0;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.bookmark-delete:hover {
+  color: #ff0000;
 }

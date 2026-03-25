@@ -10,18 +10,19 @@
 <body>
   <div id="map"></div>
   <canvas id="canvas"></canvas>
-  <div id="controls">
-    <button id="mode-btn">Switch to Compare</button>
-    <button id="delete-all-btn">Delete All</button>
-    <button id="share-btn">Share</button>
+  <div id="slider-panel">
     <div id="rotation-row">
-      <label for="rotation-slider">Rotation: <span id="rotation-value">0</span>°</label>
+      <label for="rotation-slider">Rotate drawing: <span id="rotation-value">0</span>°</label>
       <input type="range" id="rotation-slider" min="-180" max="180" value="0" step="1" />
     </div>
-    <div id="instructions">
-      <strong>Draw Mode:</strong> click to add points, double-click to close polygon
-    </div>
   </div>
+  <div id="button-row">
+    <button id="bookmark-btn" class="icon-btn" title="Bookmark this view">&#x1F4CC;</button>
+    <button id="mode-btn" class="icon-btn" title="Switch to Draw">&#x270F;&#xFE0F;</button><!-- icon set dynamically -->
+    <button id="delete-all-btn" class="icon-btn hidden" title="Delete all points">&#x1F5D1;&#xFE0F;</button>
+    <button id="share-btn" class="icon-btn" title="Share">&#x1F517;</button>
+  </div>
+  <div id="mode-toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>

@@ -13,7 +13,7 @@ const ROT_HANDLE_DIST = 48;    // px — distance of rotation handle from centro
 let map;
 let canvas;
 let ctx;
-let mode = 'draw'; // 'draw' | 'compare'
+let mode = 'draw'; // 'draw' | 'navigation'
 
 const polygon = {
   points: [],          // [{dx, dy}] offsets in meters from centroid
@@ -31,6 +31,12 @@ let selectedVertex = null; // index of selected vertex
 let pendingVertex = null;  // { index, x, y } — vertex mousedown not yet resolved as click or drag
 const DRAG_THRESHOLD = 4; // px — min movement to start a drag vs. count as a click
 
+// Bookmark state
+let bookmarks = []; // [{id, name, lat, lng, zoom}]
+
+// Toast state
+let toastTimeout = null;
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -44,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (hash) {
     deserializeState(hash);
   } else {
-    setMode('draw');
+    setMode('navigation');
   }
 });
 
@@ -107,7 +113,7 @@ function setupControls() {
   const rotValue = document.getElementById('rotation-value');
 
   modeBtn.addEventListener('click', () => {
-    setMode(mode === 'draw' ? 'compare' : 'draw');
+    setMode(mode === 'draw' ? 'navigation' : 'draw');
   });
 
   slider.addEventListener('input', () => {
@@ -118,6 +124,7 @@ function setupControls() {
 
   document.getElementById('delete-all-btn').addEventListener('click', resetPolygon);
   document.getElementById('share-btn').addEventListener('click', onShareClick);
+  document.getElementById('bookmark-btn').addEventListener('click', onBookmarkClick);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +133,7 @@ function setupControls() {
 function setMode(newMode) {
   mode = newMode;
   const modeBtn = document.getElementById('mode-btn');
-  const instructions = document.getElementById('instructions');
+  const deleteAllBtn = document.getElementById('delete-all-btn');
 
   if (mode === 'draw') {
     map.dragging.disable();
@@ -136,8 +143,9 @@ function setMode(newMode) {
     map.boxZoom.disable();
     map.keyboard.disable();
     canvas.style.pointerEvents = 'auto';
-    modeBtn.textContent = 'Switch to Compare';
-    instructions.innerHTML = '<strong>Draw Mode:</strong> click to add points, double-click to close polygon';
+    modeBtn.textContent = '\uD83D\uDDFA\uFE0F'; // map icon — click to go back to navigation
+    modeBtn.title = 'Switch to Navigation';
+    deleteAllBtn.classList.remove('hidden');
   } else {
     map.dragging.enable();
     map.scrollWheelZoom.enable();
@@ -146,11 +154,29 @@ function setMode(newMode) {
     map.boxZoom.enable();
     map.keyboard.enable();
     canvas.style.pointerEvents = 'none';
-    modeBtn.textContent = 'Switch to Draw';
-    instructions.innerHTML = '<strong>Compare Mode:</strong> pan and zoom the map freely';
+    modeBtn.textContent = '\u270F\uFE0F'; // pencil icon — click to enter draw mode
+    modeBtn.title = 'Switch to Draw';
+    deleteAllBtn.classList.add('hidden');
   }
 
+  showModeToast(mode);
   render();
+}
+
+function showModeToast(currentMode) {
+  const toast = document.getElementById('mode-toast');
+  var label = currentMode === 'draw' ? 'Draw Mode' : 'Navigation Mode';
+  toast.textContent = label;
+
+  if (toastTimeout !== null) {
+    clearTimeout(toastTimeout);
+  }
+
+  toast.classList.add('visible');
+  toastTimeout = setTimeout(function() {
+    toast.classList.remove('visible');
+    toastTimeout = null;
+  }, 2000);
 }
 
 // ---------------------------------------------------------------------------
@@ -602,24 +628,34 @@ function resetPolygon() {
 // ---------------------------------------------------------------------------
 
 function serializeState() {
-  if (polygon.points.length === 0) {
+  var hasPolygon = polygon.points.length > 0;
+  var hasBookmarks = bookmarks.length > 0;
+
+  if (!hasPolygon && !hasBookmarks) {
     return false;
   }
 
   const center = map.getCenter();
   const zoom = map.getZoom();
-  const centroidLatLng = map.containerPointToLatLng(
-    L.point(polygon.screenPos.x, polygon.screenPos.y)
-  );
 
   const payload = {
     v: 1,
     map: { lat: center.lat, lng: center.lng, z: zoom },
-    centroid: { lat: centroidLatLng.lat, lng: centroidLatLng.lng },
-    points: polygon.points.map(function(p) { return [p.dx, p.dy]; }),
-    rotation: polygon.rotation,
-    closed: polygon.closed,
   };
+
+  if (hasPolygon) {
+    const centroidLatLng = map.containerPointToLatLng(
+      L.point(polygon.screenPos.x, polygon.screenPos.y)
+    );
+    payload.centroid = { lat: centroidLatLng.lat, lng: centroidLatLng.lng };
+    payload.points = polygon.points.map(function(p) { return [p.dx, p.dy]; });
+    payload.rotation = polygon.rotation;
+    payload.closed = polygon.closed;
+  }
+
+  if (hasBookmarks) {
+    payload.bookmarks = bookmarks;
+  }
 
   window.location.hash = btoa(JSON.stringify(payload));
   return true;
@@ -630,50 +666,63 @@ function deserializeState(hash) {
     var json = atob(hash);
     var data = JSON.parse(json);
 
-    if (!data.v || !data.map || !data.centroid || !data.points) {
+    if (!data.v || !data.map) {
       console.warn('deserializeState: missing required fields');
-      setMode('draw');
+      setMode('navigation');
       return;
     }
 
     map.setView([data.map.lat, data.map.lng], data.map.z, { animate: false });
 
-    var screenPt = map.latLngToContainerPoint(
-      L.latLng(data.centroid.lat, data.centroid.lng)
-    );
-    polygon.screenPos = { x: screenPt.x, y: screenPt.y };
+    if (data.centroid && data.points) {
+      var screenPt = map.latLngToContainerPoint(
+        L.latLng(data.centroid.lat, data.centroid.lng)
+      );
+      polygon.screenPos = { x: screenPt.x, y: screenPt.y };
 
-    polygon.points = data.points.map(function(arr) {
-      return { dx: arr[0], dy: arr[1] };
-    });
-    polygon.rotation = data.rotation || 0;
-    polygon.closed = !!data.closed;
+      polygon.points = data.points.map(function(arr) {
+        return { dx: arr[0], dy: arr[1] };
+      });
+      polygon.rotation = data.rotation || 0;
+      polygon.closed = !!data.closed;
 
-    var slider = document.getElementById('rotation-slider');
-    var rotValue = document.getElementById('rotation-value');
-    slider.value = polygon.rotation;
-    rotValue.textContent = polygon.rotation;
+      var slider = document.getElementById('rotation-slider');
+      var rotValue = document.getElementById('rotation-value');
+      slider.value = polygon.rotation;
+      rotValue.textContent = polygon.rotation;
+    }
 
-    setMode('draw');
+    if (Array.isArray(data.bookmarks)) {
+      bookmarks = data.bookmarks;
+      renderBookmarkPanel();
+    }
+
+    setMode('navigation');
   } catch (err) {
     console.warn('deserializeState: invalid hash data', err);
-    setMode('draw');
+    setMode('navigation');
   }
+}
+
+function showButtonFeedback(btn, message) {
+  btn.setAttribute('data-feedback', message);
+  btn.classList.add('feedback');
+  setTimeout(function() {
+    btn.classList.remove('feedback');
+    btn.removeAttribute('data-feedback');
+  }, 1500);
 }
 
 function onShareClick() {
   var btn = document.getElementById('share-btn');
-  var originalText = btn.textContent;
 
   if (!serializeState()) {
-    btn.textContent = 'Nothing to share';
-    setTimeout(function() { btn.textContent = originalText; }, 1500);
+    showButtonFeedback(btn, 'Nothing to share');
     return;
   }
 
   navigator.clipboard.writeText(window.location.href).then(function() {
-    btn.textContent = 'Copied!';
-    setTimeout(function() { btn.textContent = originalText; }, 1500);
+    showButtonFeedback(btn, 'Copied!');
   });
 }
 
@@ -706,4 +755,150 @@ function addPoint(x, y) {
     dx: pixelsToMeters(rdpx, lat, zoom),
     dy: pixelsToMeters(rdpy, lat, zoom),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Bookmark system
+// ---------------------------------------------------------------------------
+
+function onBookmarkClick() {
+  var center = map.getCenter();
+  var zoom = map.getZoom();
+  var id = Date.now();
+
+  fetchBookmarkName(center.lat, center.lng, zoom).then(function(name) {
+    bookmarks.push({ id: id, name: name, lat: center.lat, lng: center.lng, zoom: zoom });
+    renderBookmarkPanel();
+    serializeState();
+  });
+}
+
+function fetchBookmarkName(lat, lng, zoom) {
+  var url = 'https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lng + '&format=json&zoom=' + zoom;
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function() { controller.abort(); }, 3000);
+
+  return fetch(url, { signal: controller.signal })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      clearTimeout(timeoutId);
+      if (data.address) {
+        var name = data.address.city || data.address.town || data.address.village || data.address.county || '';
+        if (name) return name;
+      }
+      if (data.display_name) {
+        return data.display_name.substring(0, 30);
+      }
+      return 'Bookmark ' + (bookmarks.length + 1);
+    })
+    .catch(function() {
+      clearTimeout(timeoutId);
+      return 'Bookmark ' + (bookmarks.length + 1);
+    });
+}
+
+function renderBookmarkPanel() {
+  var existing = document.getElementById('bookmark-panel');
+
+  if (bookmarks.length === 0) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  var panel = existing;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'bookmark-panel';
+    document.body.appendChild(panel);
+  }
+
+  panel.innerHTML = '';
+
+  bookmarks.forEach(function(bm) {
+    var row = document.createElement('div');
+    row.className = 'bookmark-row';
+
+    var nav = document.createElement('span');
+    nav.className = 'bookmark-navigate';
+    nav.textContent = '\u{1F3AF}';
+    nav.title = 'Go to ' + bm.name;
+    nav.addEventListener('click', function() { navigateToBookmark(bm.id); });
+
+    var name = document.createElement('span');
+    name.className = 'bookmark-name';
+    name.textContent = bm.name;
+    name.title = bm.name;
+    name.addEventListener('click', function() { startEditBookmarkName(bm.id); });
+
+    var del = document.createElement('span');
+    del.className = 'bookmark-delete';
+    del.textContent = '\u00D7';
+    del.title = 'Delete bookmark';
+    del.addEventListener('click', function() { deleteBookmark(bm.id); });
+
+    row.appendChild(nav);
+    row.appendChild(name);
+    row.appendChild(del);
+    panel.appendChild(row);
+  });
+}
+
+function navigateToBookmark(id) {
+  var bm = bookmarks.find(function(b) { return b.id === id; });
+  if (!bm) return;
+  map.setView([bm.lat, bm.lng], bm.zoom);
+}
+
+function startEditBookmarkName(id) {
+  var bm = bookmarks.find(function(b) { return b.id === id; });
+  if (!bm) return;
+
+  var panel = document.getElementById('bookmark-panel');
+  if (!panel) return;
+
+  var rows = panel.querySelectorAll('.bookmark-row');
+  var idx = bookmarks.indexOf(bm);
+  if (idx < 0 || idx >= rows.length) return;
+
+  var row = rows[idx];
+  var nameSpan = row.querySelector('.bookmark-name');
+  if (!nameSpan) return;
+
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'bookmark-name-input';
+  input.value = bm.name;
+
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  var saved = false;
+  function save() {
+    if (saved) return;
+    saved = true;
+    var newName = input.value.trim();
+    if (newName) bm.name = newName;
+    renderBookmarkPanel();
+    serializeState();
+  }
+
+  function cancel() {
+    if (saved) return;
+    saved = true;
+    renderBookmarkPanel();
+  }
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+
+  input.addEventListener('blur', save);
+}
+
+function deleteBookmark(id) {
+  bookmarks = bookmarks.filter(function(b) { return b.id !== id; });
+  renderBookmarkPanel();
+  serializeState();
 }
