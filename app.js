@@ -39,6 +39,11 @@ let bookmarks = []; // [{id, name, lat, lng, zoom}]
 // Toast state
 let toastTimeout = null;
 
+// Undo/redo state
+let undoStack = [];
+let redoStack = [];
+let sliderDragActive = false;
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -119,16 +124,30 @@ function setupControls() {
   });
 
   slider.addEventListener('input', () => {
+    if (!sliderDragActive) {
+      pushUndo();
+      sliderDragActive = true;
+    }
     polygon.rotation = parseInt(slider.value, 10);
     rotValue.textContent = polygon.rotation;
     render();
   });
 
-  document.getElementById('delete-all-btn').addEventListener('click', resetPolygon);
+  slider.addEventListener('change', () => {
+    sliderDragActive = false;
+  });
+
+  document.getElementById('delete-all-btn').addEventListener('click', function() {
+    pushUndo();
+    resetPolygon();
+  });
   document.getElementById('share-btn').addEventListener('click', onShareClick);
   document.getElementById('bookmark-btn').addEventListener('click', onBookmarkClick);
   document.getElementById('close-poly-btn').addEventListener('click', onClosePolygonClick);
   document.getElementById('delete-vertex-btn').addEventListener('click', onDeleteVertexClick);
+  document.getElementById('restart-btn').addEventListener('click', restartAll);
+  document.getElementById('undo-btn').addEventListener('click', undo);
+  document.getElementById('redo-btn').addEventListener('click', redo);
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +467,18 @@ function attachDrawListeners() {
 
   document.addEventListener('keydown', (e) => {
     if (mode !== 'draw') return;
+
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      undo();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      redo();
+      return;
+    }
+
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedVertex !== null) {
       deleteVertex(selectedVertex);
     }
@@ -476,6 +507,7 @@ function onCanvasPointerdown(e) {
 
   if (hit.type === 'empty') {
     if (!polygon.closed) {
+      pushUndo();
       selectedVertex = null;
       addPoint(x, y);
       updateContextButtons();
@@ -485,6 +517,7 @@ function onCanvasPointerdown(e) {
   }
 
   if (hit.type === 'body') {
+    pushUndo();
     selectedVertex = null;
     drag = {
       type: 'body',
@@ -496,6 +529,7 @@ function onCanvasPointerdown(e) {
   }
 
   if (hit.type === 'rotation-handle') {
+    pushUndo();
     drag = {
       type: 'rotation-handle',
       startX: x,
@@ -513,6 +547,7 @@ function onCanvasPointermove(e) {
   if (pendingVertex) {
     var threshold = (activePointerType === 'mouse') ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH;
     if (dist(x, y, pendingVertex.x, pendingVertex.y) > threshold) {
+      pushUndo();
       drag = { type: 'vertex', index: pendingVertex.index, startX: pendingVertex.x, startY: pendingVertex.y };
       pendingVertex = null;
     }
@@ -588,6 +623,7 @@ function onCanvasPointerup(e) {
     // Pointer didn't move enough to drag — treat as click
     // If tapping first vertex on an open polygon with >= 3 points, close it
     if (pendingVertex.index === 0 && polygon.points.length >= 3 && !polygon.closed) {
+      pushUndo();
       polygon.closed = true;
       selectedVertex = null;
       pendingVertex = null;
@@ -617,6 +653,7 @@ function onCanvasDblclick(e) {
   if (!polygon.closed && polygon.points.length >= 3) {
     const hit = hitTest(e.offsetX, e.offsetY);
     if (hit.type === 'empty' || hit.type === 'body' || hit.type === 'vertex') {
+      pushUndo();
       polygon.closed = true;
       updateContextButtons();
       render();
@@ -632,6 +669,9 @@ function updateContextButtons() {
   var closeBtn = document.getElementById('close-poly-btn');
   var deleteVertexBtn = document.getElementById('delete-vertex-btn');
   var deleteAllBtn = document.getElementById('delete-all-btn');
+  var undoBtn = document.getElementById('undo-btn');
+  var redoBtn = document.getElementById('redo-btn');
+  var restartBtn = document.getElementById('restart-btn');
 
   if (mode === 'draw') {
     // Close Polygon: visible when drawing, >= 3 points, not yet closed
@@ -650,10 +690,36 @@ function updateContextButtons() {
 
     // Delete All: always visible in draw mode
     deleteAllBtn.classList.remove('hidden');
+
+    // Undo: always visible in draw mode, dimmed when stack empty
+    undoBtn.classList.remove('hidden');
+    if (undoStack.length === 0) {
+      undoBtn.classList.add('disabled');
+    } else {
+      undoBtn.classList.remove('disabled');
+    }
+
+    // Redo: always visible in draw mode, dimmed when stack empty
+    redoBtn.classList.remove('hidden');
+    if (redoStack.length === 0) {
+      redoBtn.classList.add('disabled');
+    } else {
+      redoBtn.classList.remove('disabled');
+    }
+
+    // Restart: visible when polygon has points OR bookmarks exist
+    if (polygon.points.length > 0 || bookmarks.length > 0) {
+      restartBtn.classList.remove('hidden');
+    } else {
+      restartBtn.classList.add('hidden');
+    }
   } else {
     closeBtn.classList.add('hidden');
     deleteVertexBtn.classList.add('hidden');
     deleteAllBtn.classList.add('hidden');
+    undoBtn.classList.add('hidden');
+    redoBtn.classList.add('hidden');
+    restartBtn.classList.add('hidden');
   }
 }
 
@@ -662,6 +728,7 @@ function onClosePolygonClick() {
   if (polygon.closed) return;
   if (polygon.points.length < 3) return;
 
+  pushUndo();
   polygon.closed = true;
   updateContextButtons();
   render();
@@ -678,6 +745,7 @@ function onDeleteVertexClick() {
 // Vertex deletion and reset
 // ---------------------------------------------------------------------------
 function deleteVertex(index) {
+  pushUndo();
   polygon.points.splice(index, 1);
   if (polygon.points.length < 3) polygon.closed = false;
   if (polygon.points.length === 0) {
@@ -703,6 +771,86 @@ function resetPolygon() {
   hoveredVertex = null;
   pendingVertex = null;
   drag = null;
+  updateContextButtons();
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Undo / Redo
+// ---------------------------------------------------------------------------
+
+function captureState() {
+  return {
+    points: polygon.points.map(function(p) { return { dx: p.dx, dy: p.dy }; }),
+    screenPos: { x: polygon.screenPos.x, y: polygon.screenPos.y },
+    rotation: polygon.rotation,
+    closed: polygon.closed,
+    bookmarks: bookmarks.map(function(b) {
+      return { id: b.id, name: b.name, lat: b.lat, lng: b.lng, zoom: b.zoom };
+    }),
+  };
+}
+
+function restoreState(state) {
+  polygon.points = state.points.map(function(p) { return { dx: p.dx, dy: p.dy }; });
+  polygon.screenPos = { x: state.screenPos.x, y: state.screenPos.y };
+  polygon.rotation = state.rotation;
+  polygon.closed = state.closed;
+  bookmarks = state.bookmarks.map(function(b) {
+    return { id: b.id, name: b.name, lat: b.lat, lng: b.lng, zoom: b.zoom };
+  });
+
+  selectedVertex = null;
+  hoveredVertex = null;
+  pendingVertex = null;
+  drag = null;
+
+  var slider = document.getElementById('rotation-slider');
+  var rotValue = document.getElementById('rotation-value');
+  slider.value = polygon.rotation;
+  rotValue.textContent = polygon.rotation;
+
+  renderBookmarkPanel();
+  updateContextButtons();
+  render();
+}
+
+function pushUndo() {
+  undoStack.push(captureState());
+  redoStack = [];
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(captureState());
+  restoreState(undoStack.pop());
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(captureState());
+  restoreState(redoStack.pop());
+}
+
+function restartAll() {
+  pushUndo();
+  polygon.points = [];
+  polygon.closed = false;
+  polygon.rotation = 0;
+  polygon.screenPos = { x: 0, y: 0 };
+  bookmarks = [];
+
+  var slider = document.getElementById('rotation-slider');
+  var rotValue = document.getElementById('rotation-value');
+  slider.value = 0;
+  rotValue.textContent = '0';
+
+  selectedVertex = null;
+  hoveredVertex = null;
+  pendingVertex = null;
+  drag = null;
+
+  renderBookmarkPanel();
   updateContextButtons();
   render();
 }
