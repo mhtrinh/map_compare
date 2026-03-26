@@ -674,23 +674,6 @@ function updateContextButtons() {
   var restartBtn = document.getElementById('restart-btn');
 
   if (mode === 'draw') {
-    // Close Polygon: visible when drawing, >= 3 points, not yet closed
-    if (polygon.points.length >= 3 && !polygon.closed) {
-      closeBtn.classList.remove('hidden');
-    } else {
-      closeBtn.classList.add('hidden');
-    }
-
-    // Delete Vertex: visible when a vertex is selected
-    if (selectedVertex !== null) {
-      deleteVertexBtn.classList.remove('hidden');
-    } else {
-      deleteVertexBtn.classList.add('hidden');
-    }
-
-    // Delete All: always visible in draw mode
-    deleteAllBtn.classList.remove('hidden');
-
     // Undo: always visible in draw mode, dimmed when stack empty
     undoBtn.classList.remove('hidden');
     if (undoStack.length === 0) {
@@ -707,19 +690,40 @@ function updateContextButtons() {
       redoBtn.classList.remove('disabled');
     }
 
+    // Delete All: always visible in draw mode
+    deleteAllBtn.classList.remove('hidden');
+
     // Restart: visible when polygon has points OR bookmarks exist
     if (polygon.points.length > 0 || bookmarks.length > 0) {
       restartBtn.classList.remove('hidden');
     } else {
       restartBtn.classList.add('hidden');
     }
+
+    // Close Polygon: reserved space at bottom, visible when >= 3 points and not closed
+    closeBtn.classList.remove('hidden');
+    if (polygon.points.length >= 3 && !polygon.closed) {
+      closeBtn.classList.remove('reserved');
+    } else {
+      closeBtn.classList.add('reserved');
+    }
+
+    // Delete Vertex: reserved space at bottom, visible when a vertex is selected
+    deleteVertexBtn.classList.remove('hidden');
+    if (selectedVertex !== null) {
+      deleteVertexBtn.classList.remove('reserved');
+    } else {
+      deleteVertexBtn.classList.add('reserved');
+    }
   } else {
-    closeBtn.classList.add('hidden');
-    deleteVertexBtn.classList.add('hidden');
     deleteAllBtn.classList.add('hidden');
     undoBtn.classList.add('hidden');
     redoBtn.classList.add('hidden');
     restartBtn.classList.add('hidden');
+    closeBtn.classList.remove('reserved');
+    closeBtn.classList.add('hidden');
+    deleteVertexBtn.classList.remove('reserved');
+    deleteVertexBtn.classList.add('hidden');
   }
 }
 
