@@ -29,7 +29,9 @@ let drag = null; // null or { type, startX, startY, origScreenPos, origPoints, o
 let hoveredVertex = null;  // index of vertex under mouse
 let selectedVertex = null; // index of selected vertex
 let pendingVertex = null;  // { index, x, y } — vertex mousedown not yet resolved as click or drag
-const DRAG_THRESHOLD = 4; // px — min movement to start a drag vs. count as a click
+const DRAG_THRESHOLD_MOUSE = 4;  // px — min movement for mouse
+const DRAG_THRESHOLD_TOUCH = 10; // px — min movement for touch/pen
+let activePointerType = 'mouse'; // 'mouse' | 'touch' | 'pen'
 
 // Bookmark state
 let bookmarks = []; // [{id, name, lat, lng, zoom}]
@@ -125,6 +127,8 @@ function setupControls() {
   document.getElementById('delete-all-btn').addEventListener('click', resetPolygon);
   document.getElementById('share-btn').addEventListener('click', onShareClick);
   document.getElementById('bookmark-btn').addEventListener('click', onBookmarkClick);
+  document.getElementById('close-poly-btn').addEventListener('click', onClosePolygonClick);
+  document.getElementById('delete-vertex-btn').addEventListener('click', onDeleteVertexClick);
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +137,6 @@ function setupControls() {
 function setMode(newMode) {
   mode = newMode;
   const modeBtn = document.getElementById('mode-btn');
-  const deleteAllBtn = document.getElementById('delete-all-btn');
 
   if (mode === 'draw') {
     map.dragging.disable();
@@ -145,7 +148,6 @@ function setMode(newMode) {
     canvas.style.pointerEvents = 'auto';
     modeBtn.textContent = '\uD83D\uDDFA\uFE0F'; // map icon — click to go back to navigation
     modeBtn.title = 'Switch to Navigation';
-    deleteAllBtn.classList.remove('hidden');
   } else {
     map.dragging.enable();
     map.scrollWheelZoom.enable();
@@ -156,9 +158,9 @@ function setMode(newMode) {
     canvas.style.pointerEvents = 'none';
     modeBtn.textContent = '\u270F\uFE0F'; // pencil icon — click to enter draw mode
     modeBtn.title = 'Switch to Draw';
-    deleteAllBtn.classList.add('hidden');
   }
 
+  updateContextButtons();
   showModeToast(mode);
   render();
 }
@@ -357,29 +359,37 @@ function drawRotationHandle() {
 /**
  * Returns { type: 'rotation-handle' | 'delete-icon' | 'vertex' | 'body' | 'empty', index? }
  */
-function hitTest(x, y) {
+function hitTest(x, y, pointerType) {
   if (polygon.points.length === 0) return { type: 'empty' };
+
+  var isTouch = (pointerType === 'touch' || pointerType === 'pen');
+  var handleRadius = isTouch ? HANDLE_RADIUS + 8 : HANDLE_RADIUS + 2;
+  var deleteRadius = isTouch ? 16 : 10;
+  var polylineThreshold = isTouch ? 14 : 8;
 
   // 1. Rotation handle
   const rh = getRotationHandlePos();
-  if (dist(x, y, rh.x, rh.y) <= HANDLE_RADIUS + 2) {
+  if (dist(x, y, rh.x, rh.y) <= handleRadius) {
     return { type: 'rotation-handle' };
   }
 
   const pts = computePixelPoints();
 
-  // 2. Delete icons (checked before vertex handles so clicking ✕ doesn't trigger drag)
-  for (let i = 0; i < pts.length; i++) {
-    const ix = pts[i].x + 10;
-    const iy = pts[i].y - 10;
-    if (dist(x, y, ix, iy) <= 10) {
-      return { type: 'delete-icon', index: i };
+  // 2. Delete icons (checked before vertex handles so clicking X doesn't trigger drag)
+  // Skip for touch — touch users use the Delete Vertex button instead
+  if (!isTouch) {
+    for (let i = 0; i < pts.length; i++) {
+      const ix = pts[i].x + 10;
+      const iy = pts[i].y - 10;
+      if (dist(x, y, ix, iy) <= deleteRadius) {
+        return { type: 'delete-icon', index: i };
+      }
     }
   }
 
   // 3. Vertex handles (open or closed)
   for (let i = 0; i < pts.length; i++) {
-    if (dist(x, y, pts[i].x, pts[i].y) <= HANDLE_RADIUS + 2) {
+    if (dist(x, y, pts[i].x, pts[i].y) <= handleRadius) {
       return { type: 'vertex', index: i };
     }
   }
@@ -388,7 +398,7 @@ function hitTest(x, y) {
   if (polygon.closed && pts.length >= 3 && pointInPolygon(x, y, pts)) {
     return { type: 'body' };
   }
-  if (!polygon.closed && pts.length >= 2 && nearPolyline(x, y, pts)) {
+  if (!polygon.closed && pts.length >= 2 && nearPolyline(x, y, pts, polylineThreshold)) {
     return { type: 'body' };
   }
 
@@ -430,9 +440,10 @@ function distToSegment(px, py, a, b) {
 // Interaction handlers
 // ---------------------------------------------------------------------------
 function attachDrawListeners() {
-  canvas.addEventListener('mousedown', onCanvasMousedown);
-  canvas.addEventListener('mousemove', onCanvasMousemove);
-  canvas.addEventListener('mouseup', onCanvasMouseup);
+  canvas.addEventListener('pointerdown', onCanvasPointerdown);
+  canvas.addEventListener('pointermove', onCanvasPointermove);
+  canvas.addEventListener('pointerup', onCanvasPointerup);
+  canvas.addEventListener('pointerleave', onCanvasPointerleave);
   canvas.addEventListener('dblclick', onCanvasDblclick);
 
   document.addEventListener('keydown', (e) => {
@@ -443,13 +454,14 @@ function attachDrawListeners() {
   });
 }
 
-function onCanvasMousedown(e) {
+function onCanvasPointerdown(e) {
   if (mode !== 'draw') return;
   e.preventDefault();
 
+  activePointerType = e.pointerType;
   const x = e.offsetX;
   const y = e.offsetY;
-  const hit = hitTest(x, y);
+  const hit = hitTest(x, y, activePointerType);
 
   if (hit.type === 'delete-icon') {
     deleteVertex(hit.index);
@@ -457,7 +469,7 @@ function onCanvasMousedown(e) {
   }
 
   if (hit.type === 'vertex') {
-    // Defer to mouseup to distinguish click (select) from drag
+    // Defer to pointerup to distinguish click (select) from drag
     pendingVertex = { index: hit.index, x, y };
     return;
   }
@@ -466,6 +478,7 @@ function onCanvasMousedown(e) {
     if (!polygon.closed) {
       selectedVertex = null;
       addPoint(x, y);
+      updateContextButtons();
       render();
     }
     return;
@@ -492,21 +505,22 @@ function onCanvasMousedown(e) {
   }
 }
 
-function onCanvasMousemove(e) {
+function onCanvasPointermove(e) {
   const x = e.offsetX;
   const y = e.offsetY;
 
   // Resolve pendingVertex: enough movement → start drag; otherwise keep pending
   if (pendingVertex) {
-    if (dist(x, y, pendingVertex.x, pendingVertex.y) > DRAG_THRESHOLD) {
+    var threshold = (activePointerType === 'mouse') ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH;
+    if (dist(x, y, pendingVertex.x, pendingVertex.y) > threshold) {
       drag = { type: 'vertex', index: pendingVertex.index, startX: pendingVertex.x, startY: pendingVertex.y };
       pendingVertex = null;
     }
   }
 
-  // Update hoveredVertex on every move
-  if (!drag && !pendingVertex) {
-    const hit = hitTest(x, y);
+  // Update hoveredVertex on every move — mouse only (no hover concept on touch)
+  if (!drag && !pendingVertex && activePointerType === 'mouse') {
+    const hit = hitTest(x, y, activePointerType);
     const newHovered = (hit.type === 'vertex' || hit.type === 'delete-icon') ? hit.index : null;
     if (newHovered !== hoveredVertex) {
       hoveredVertex = newHovered;
@@ -569,14 +583,31 @@ function onCanvasMousemove(e) {
   }
 }
 
-function onCanvasMouseup(e) {
+function onCanvasPointerup(e) {
   if (pendingVertex) {
-    // Mouse didn't move enough to drag — treat as click → select
-    selectedVertex = pendingVertex.index;
-    pendingVertex = null;
-    render();
+    // Pointer didn't move enough to drag — treat as click
+    // If tapping first vertex on an open polygon with >= 3 points, close it
+    if (pendingVertex.index === 0 && polygon.points.length >= 3 && !polygon.closed) {
+      polygon.closed = true;
+      selectedVertex = null;
+      pendingVertex = null;
+      updateContextButtons();
+      render();
+    } else {
+      selectedVertex = pendingVertex.index;
+      pendingVertex = null;
+      updateContextButtons();
+      render();
+    }
   }
   drag = null;
+}
+
+function onCanvasPointerleave(e) {
+  if (hoveredVertex !== null) {
+    hoveredVertex = null;
+    render();
+  }
 }
 
 function onCanvasDblclick(e) {
@@ -587,9 +618,60 @@ function onCanvasDblclick(e) {
     const hit = hitTest(e.offsetX, e.offsetY);
     if (hit.type === 'empty' || hit.type === 'body' || hit.type === 'vertex') {
       polygon.closed = true;
+      updateContextButtons();
       render();
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Context buttons (Close Polygon, Delete Vertex, Delete All)
+// ---------------------------------------------------------------------------
+
+function updateContextButtons() {
+  var closeBtn = document.getElementById('close-poly-btn');
+  var deleteVertexBtn = document.getElementById('delete-vertex-btn');
+  var deleteAllBtn = document.getElementById('delete-all-btn');
+
+  if (mode === 'draw') {
+    // Close Polygon: visible when drawing, >= 3 points, not yet closed
+    if (polygon.points.length >= 3 && !polygon.closed) {
+      closeBtn.classList.remove('hidden');
+    } else {
+      closeBtn.classList.add('hidden');
+    }
+
+    // Delete Vertex: visible when a vertex is selected
+    if (selectedVertex !== null) {
+      deleteVertexBtn.classList.remove('hidden');
+    } else {
+      deleteVertexBtn.classList.add('hidden');
+    }
+
+    // Delete All: always visible in draw mode
+    deleteAllBtn.classList.remove('hidden');
+  } else {
+    closeBtn.classList.add('hidden');
+    deleteVertexBtn.classList.add('hidden');
+    deleteAllBtn.classList.add('hidden');
+  }
+}
+
+function onClosePolygonClick() {
+  if (mode !== 'draw') return;
+  if (polygon.closed) return;
+  if (polygon.points.length < 3) return;
+
+  polygon.closed = true;
+  updateContextButtons();
+  render();
+}
+
+function onDeleteVertexClick() {
+  if (mode !== 'draw') return;
+  if (selectedVertex === null) return;
+
+  deleteVertex(selectedVertex);
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +686,7 @@ function deleteVertex(index) {
   }
   selectedVertex = null;
   hoveredVertex = null;
+  updateContextButtons();
   render();
 }
 
@@ -620,6 +703,7 @@ function resetPolygon() {
   hoveredVertex = null;
   pendingVertex = null;
   drag = null;
+  updateContextButtons();
   render();
 }
 

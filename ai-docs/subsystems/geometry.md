@@ -30,12 +30,14 @@ Covers coordinate math, hit testing, and the polygon data model.
 - The first vertex added sets the centroid screen position; its meter offset is zero
 - Meter-to-pixel conversion must be consistent in both directions so that dragging a vertex and reading it back produces the same meter offset
 - Rotation is applied in the meter-offset domain before converting to pixels
-- Hit testing priority order (highest to lowest): rotation handle, delete icons, vertex handles, polygon body, empty — this ensures overlapping elements resolve to the most specific interactive target
+- Hit testing priority order (highest to lowest): rotation handle, delete icons (mouse only), vertex handles, polygon body, empty — this ensures overlapping elements resolve to the most specific interactive target
+- Hit test accepts an optional pointer type; touch/pen input uses expanded radii for finger-friendly selection, and skips delete-icon detection (touch users delete via button instead)
 - Deleting a vertex that brings the count below 3 forces the polygon open; deleting all vertices resets the entire state
 
 ## Expected Behavior
 
 - At higher zoom levels, the same meter distance produces more pixels
 - At higher latitudes, the same meter distance produces fewer pixels (Mercator distortion)
-- Hit test returns one of: `rotation-handle`, `delete-icon` (with index), `vertex` (with index), `body`, or `empty`
+- Hit test returns one of: `rotation-handle`, `delete-icon` (with index, mouse only), `vertex` (with index), `body`, or `empty`
 - With no polygon present, hit test always returns empty
+- When pointer type is touch or pen, hit radii are larger (15px vertex/rotation, 14px polyline nearness) vs mouse (9px vertex/rotation, 8px polyline nearness)
