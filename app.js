@@ -893,13 +893,13 @@ function serializeState() {
     payload.bookmarks = bookmarks;
   }
 
-  window.location.hash = btoa(JSON.stringify(payload));
+  window.location.hash = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
   return true;
 }
 
 function deserializeState(hash) {
   try {
-    var json = atob(hash);
+    var json = decodeURIComponent(escape(atob(hash)));
     var data = JSON.parse(json);
 
     if (!data.v || !data.map) {
